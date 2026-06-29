@@ -175,12 +175,13 @@ jobs:
 
       - name: Upload Kernel to Release
         uses: ncipollo/release-action@main
-        if: ${{ env.PACKAGED_STATUS  == 'success' && !cancelled() }}
+        if: ${{ steps.compile.outputs.status == 'success' && !cancelled() }}
         with:
           tag: kernel_rk35xx
           artifacts: ${{ env.PACKAGED_OUTPUTPATH }}/*
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
+          path: /builder/output/arch/arm64/boot/dts/rockchip/  # dtb 文件所在目录
           body: |
             - The kernel can be used to compile Armbian and OpenWrt.
             - The kernel source code comes from: unifreq/linux-5.10.y-rk35xx
