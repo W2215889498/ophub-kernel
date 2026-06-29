@@ -10,6 +10,15 @@ on:
         options:
           - 6.1.y
           - 6.1.115
+          - 5.10.y
+          - 5.10.160
+      kernel_package:
+        description: "Compile package list"
+        default: "all"
+        type: choice
+        options:
+          - all
+          - dtbs
 
 env:
   TZ: America/New_York
@@ -19,12 +28,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04-arm
     steps:
-      - name: Checkout tool repo (this repo)
+      - name: Checkout tool repo
         uses: actions/checkout@v4
-
-      - name: Check config exists
-        run: |
-          ls -la kernel-config/release/rk35xx || (echo "ERROR: kernel-config missing!" && exit 1)
 
       - name: Prepare environment
         env:
@@ -32,23 +37,28 @@ jobs:
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android ~/.cargo
           sudo -E apt-get update -qq
-          sudo -E apt-get install -y $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          
+          # 安装依赖，同时压制容器环境下 systemd 的非致命警告
+          sudo -E apt-get install -y $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian) 2>&1 | \
+            grep -v "System has not been booted with systemd" | \
+            grep -v "Failed to connect to system scope bus" | \
+            grep -v "non-existent unit" || true
+            
           sudo -E apt-get clean
 
       - name: Compile kernel
         uses: ophub/amlogic-s9xxx-armbian@main
         id: compile
-        # 关键：不要 continue-on-error，让真正的错误暴露出来
         with:
           build_target: kernel
-          # 这里必须是真正的 Linux 内核源码仓库！
-          kernel_source: unifreq/linux-6.1.y-rockchip
+          kernel_source: W2215889498/linux-6.1.y-rockchip
           kernel_version: ${{ inputs.kernel_version }}
           kernel_auto: false
           delete_source: true
+          kernel_package: ${{ inputs.kernel_package }}
           kernel_sign: "-rk35xx-leegartu"
           kernel_config: kernel-config/release/rk35xx
-          silent_log: false  # 关闭静默日志，方便调试
+          silent_log: false
 
       - name: Check output
         id: check
@@ -69,6 +79,7 @@ jobs:
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - Source: unifreq/linux-6.1.y-rockchip
+            - Source: W2215889498/linux-6.1.y-rockchip
             - Version: ${{ inputs.kernel_version }}
+            - Package: ${{ inputs.kernel_package }}
             - For Rockchip rk3528/rk3566/rk3568 only.
