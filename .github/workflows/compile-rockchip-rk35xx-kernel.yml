@@ -151,10 +151,12 @@ jobs:
         run: |
           df -hT ${PWD}
           mkdir -p /builder/{kernel,output}
-          ln -sf /builder/kernel /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/kernel
-          ln -sf /builder/output /home/runner/work/_actions/ophub/amlogic-s9xxx-armbian/main/compile-kernel/output
+          # 创建目标目录并软链接，匹配编译工具的期望路径
+          sudo mkdir -p /opt/kernel/compile-kernel
+          sudo ln -sf /builder/kernel /opt/kernel/compile-kernel/kernel
+          sudo ln -sf /builder/output /opt/kernel/compile-kernel/output
           echo "status=success" >> ${GITHUB_OUTPUT}
-
+          
       - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
         uses: ophub/amlogic-s9xxx-armbian@main
         if: ${{ steps.mapped.outputs.status  == 'success' && !cancelled() }}
