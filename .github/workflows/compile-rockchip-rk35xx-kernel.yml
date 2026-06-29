@@ -99,7 +99,6 @@ env:
 jobs:
   build:
     runs-on: ubuntu-22.04-arm
-    # 修复：确保只在仓库所有者触发时运行（防止外部恶意触发）
     if: github.event.repository.owner.id == github.event.sender.id
 
     steps:
@@ -152,13 +151,12 @@ jobs:
         run: |
           df -hT ${PWD}
           mkdir -p /builder/{kernel,output}
-          # 创建目标目录并软链接，匹配编译工具的期望路径
           sudo mkdir -p /opt/kernel/compile-kernel
           sudo ln -sf /builder/kernel /opt/kernel/compile-kernel/kernel
           sudo ln -sf /builder/output /opt/kernel/compile-kernel/output
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      # 修复：将 uses 和 run 拆分为两个独立步骤
+      # ==================== 关键修复：分离 uses 和 run ====================
       - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
         uses: ophub/amlogic-s9xxx-armbian@main
         id: compile
@@ -176,30 +174,45 @@ jobs:
           compress_format: ${{ inputs.compress_format }}
           silent_log: ${{ inputs.silent_log }}
 
-      - name: Set compile outputs
-        id: compile-env
+      - name: Check compilation outputs
+        id: check
         if: steps.compile.outputs.status == 'success' && !cancelled()
         run: |
-          # 编译完成后，设置环境变量（确保上传步骤能引用）
           echo "PACKAGED_STATUS=success" >> $GITHUB_ENV
           echo "PACKAGED_OUTPUTPATH=/builder/output" >> $GITHUB_ENV
           echo "status=success" >> $GITHUB_OUTPUT
+          
+          # 调试：列出输出目录内容，确认文件存在
+          echo "=== Output directory contents ==="
+          ls -lah /builder/output/ 2>/dev/null || echo "Output dir not found or empty"
+          
+          echo "=== DTB files ==="
+          find /builder/output -name "*.dtb" -type f 2>/dev/null || echo "No .dtb files found"
+          
+          echo "=== Package files ==="
+          find /builder/output -name "*.deb" -o -name "*.tar.gz" -o -name "*.zip" 2>/dev/null || echo "No package files found"
 
+      # ==================== 关键修复：更宽松的上传配置 ====================
       - name: Upload Kernel to Release
-        uses: ncipollo/release-action@main
-        if: steps.compile-env.outputs.status == 'success' && !cancelled()
+        uses: ncipollo/release-action@v1
+        if: steps.check.outputs.status == 'success' && !cancelled()
         with:
-          tag: kernel_rk35xx
-          # 优化：根据编译类型选择上传产物
-          artifacts: |
-            ${{ env.PACKAGED_OUTPUTPATH }}/arch/arm64/boot/dts/rockchip/*.dtb
-            ${{ env.PACKAGED_OUTPUTPATH }}/**/*.deb
-            ${{ env.PACKAGED_OUTPUTPATH }}/**/*.tar.gz
+          tag: kernel_rk35xx_${{ inputs.kernel_version }}
+          # 使用多行匹配，确保能捕获各种输出物
+          artifacts: "/builder/output/**/*"
           allowUpdates: true
+          makeLatest: false
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
+            ## Rockchip RK35XX Kernel ${{ inputs.kernel_version }}
+
+            | Item | Value |
+            |------|-------|
+            | Source | ${{ inputs.kernel_source }} |
+            | Version | ${{ inputs.kernel_version }} |
+            | Toolchain | ${{ inputs.kernel_toolchain }} |
+            | Config | ${{ inputs.kernel_config }} |
+
             - The kernel can be used to compile Armbian and OpenWrt.
-            - The kernel source code comes from: ${{ inputs.kernel_source }}
-            - The kernel compilation toolchain: ${{ inputs.kernel_toolchain }}
             - This is a dedicated kernel for `Rockchip rk3528/rk3566/rk3568` and is not compatible with other series.
             - 这是 `Rockchip rk3528/rk3566/rk3568` 专用内核，和其他系列不通用。
