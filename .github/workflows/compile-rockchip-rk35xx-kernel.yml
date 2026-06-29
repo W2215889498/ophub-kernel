@@ -16,6 +16,7 @@ on:
         default: "LeeGartu/unifreq-linux-5.10.y-rk35xx"
         type: choice
         options:
+          - W2215889498/unifreq-linux-6.1.y-rockchip
           - LeeGartu/unifreq-linux-5.10.y-rk35xx
           - LeeGartu/unifreq-linux-6.1.y-rockchip
           - unifreq/linux-5.10.y-rk35xx
