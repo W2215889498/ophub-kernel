@@ -79,7 +79,7 @@ jobs:
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - Source: W2215889498/linux-6.1.y-rockchip
+            - Source: W2215889498/unifreq-linux-6.1.y-rockchip
             - Version: ${{ inputs.kernel_version }}
             - Package: ${{ inputs.kernel_package }}
             - For Rockchip rk3528/rk3566/rk3568 only.
