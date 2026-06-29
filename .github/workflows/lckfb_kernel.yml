@@ -51,7 +51,7 @@ jobs:
         id: compile
         with:
           build_target: kernel
-          kernel_source: W2215889498/linux-6.1.y-rockchip
+          kernel_source: W2215889498/unifreq-linux-6.1.y-rockchip
           kernel_version: ${{ inputs.kernel_version }}
           kernel_auto: false
           delete_source: true
