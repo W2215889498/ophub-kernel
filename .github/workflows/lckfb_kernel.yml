@@ -1,19 +1,15 @@
 name: Compile RK35XX Kernel
 
 on:
-  repository_dispatch:
   workflow_dispatch:
     inputs:
       kernel_version:
         description: "Kernel version"
-        required: false
         default: "6.1.y"
         type: choice
         options:
           - 6.1.y
-          - 5.10.y
           - 6.1.115
-          - 5.10.160
 
 env:
   TZ: America/New_York
@@ -23,58 +19,56 @@ jobs:
   build:
     runs-on: ubuntu-22.04-arm
     steps:
-      - name: Checkout
+      - name: Checkout tool repo (this repo)
         uses: actions/checkout@v4
+
+      - name: Check config exists
+        run: |
+          ls -la kernel-config/release/rk35xx || (echo "ERROR: kernel-config missing!" && exit 1)
 
       - name: Prepare environment
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc ~/.cargo ~/.dotnet
-          sudo -E apt-get -y update -qq
-          sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android ~/.cargo
+          sudo -E apt-get update -qq
+          sudo -E apt-get install -y $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
           sudo -E apt-get clean
-
-      - name: Setup workspace
-        run: |
-          sudo mkdir -p /opt/kernel/compile-kernel
-          sudo ln -sf /opt/kernel/compile-kernel /builder
-          mkdir -p /builder/{kernel,output}
 
       - name: Compile kernel
         uses: ophub/amlogic-s9xxx-armbian@main
         id: compile
-        continue-on-error: true
+        # 关键：不要 continue-on-error，让真正的错误暴露出来
         with:
           build_target: kernel
-          kernel_source: W2215889498/ophub-kernel
+          # 这里必须是真正的 Linux 内核源码仓库！
+          kernel_source: unifreq/linux-6.1.y-rockchip
           kernel_version: ${{ inputs.kernel_version }}
           kernel_auto: false
           delete_source: true
           kernel_sign: "-rk35xx-leegartu"
           kernel_config: kernel-config/release/rk35xx
-          silent_log: true
+          silent_log: false  # 关闭静默日志，方便调试
 
-      - name: Verify output
-        id: verify
+      - name: Check output
+        id: check
         if: always()
         run: |
-          if [ -d "/builder/output" ] && [ -n "$(find /builder/output -type f | head -1)" ]; then
-            echo "has_files=true" >> $GITHUB_OUTPUT
-          else
-            echo "has_files=false" >> $GITHUB_OUTPUT
-          fi
+          OUT="/opt/kernel/compile-kernel/output"
+          echo "=== Compile outcome: ${{ steps.compile.outcome }} ==="
+          ls -la "$OUT" 2>/dev/null || true
+          find "$OUT" -type f 2>/dev/null | head -20 || true
+          [ -n "$(find "$OUT" -type f 2>/dev/null | head -1)" ] && echo "has_files=true" >> $GITHUB_OUTPUT || echo "has_files=false" >> $GITHUB_OUTPUT
 
       - name: Upload to Release
-        if: steps.verify.outputs.has_files == 'true'
+        if: steps.check.outputs.has_files == 'true'
         uses: ncipollo/release-action@v1
         with:
           tag: kernel_rk35xx_${{ inputs.kernel_version }}
-          artifacts: "/builder/output/**/*"
+          artifacts: "/opt/kernel/compile-kernel/output/**/*"
           allowUpdates: true
           token: ${{ secrets.GITHUB_TOKEN }}
           body: |
-            - Source: W2215889498/ophub-kernel
+            - Source: unifreq/linux-6.1.y-rockchip
             - Version: ${{ inputs.kernel_version }}
             - For Rockchip rk3528/rk3566/rk3568 only.
-            - 这是 Rockchip rk3528/rk3566/rk3568 专用内核。
