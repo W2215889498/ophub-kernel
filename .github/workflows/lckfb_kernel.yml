@@ -1,0 +1,80 @@
+name: Compile RK35XX Kernel
+
+on:
+  repository_dispatch:
+  workflow_dispatch:
+    inputs:
+      kernel_version:
+        description: "Kernel version"
+        required: false
+        default: "6.1.y"
+        type: choice
+        options:
+          - 6.1.y
+          - 5.10.y
+          - 6.1.115
+          - 5.10.160
+
+env:
+  TZ: America/New_York
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare environment
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc ~/.cargo ~/.dotnet
+          sudo -E apt-get -y update -qq
+          sudo -E apt-get -y install $(curl -fsSL https://tinyurl.com/ubuntu2204-build-armbian)
+          sudo -E apt-get clean
+
+      - name: Setup workspace
+        run: |
+          sudo mkdir -p /opt/kernel/compile-kernel
+          sudo ln -sf /opt/kernel/compile-kernel /builder
+          mkdir -p /builder/{kernel,output}
+
+      - name: Compile kernel
+        uses: ophub/amlogic-s9xxx-armbian@main
+        id: compile
+        continue-on-error: true
+        with:
+          build_target: kernel
+          kernel_source: W2215889498/ophub-kernel
+          kernel_version: ${{ inputs.kernel_version }}
+          kernel_auto: false
+          delete_source: true
+          kernel_sign: "-rk35xx-leegartu"
+          kernel_config: kernel-config/release/rk35xx
+          silent_log: true
+
+      - name: Verify output
+        id: verify
+        if: always()
+        run: |
+          if [ -d "/builder/output" ] && [ -n "$(find /builder/output -type f | head -1)" ]; then
+            echo "has_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "has_files=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload to Release
+        if: steps.verify.outputs.has_files == 'true'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: kernel_rk35xx_${{ inputs.kernel_version }}
+          artifacts: "/builder/output/**/*"
+          allowUpdates: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+          body: |
+            - Source: W2215889498/ophub-kernel
+            - Version: ${{ inputs.kernel_version }}
+            - For Rockchip rk3528/rk3566/rk3568 only.
+            - 这是 Rockchip rk3528/rk3566/rk3568 专用内核。
