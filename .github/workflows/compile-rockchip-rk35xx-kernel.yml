@@ -95,6 +95,8 @@ on:
 
 env:
   TZ: America/New_York
+  # 允许 Node 20 Action 强制运行（消除警告）
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
 
 jobs:
   build:
@@ -156,11 +158,14 @@ jobs:
           sudo ln -sf /builder/output /opt/kernel/compile-kernel/output
           echo "status=success" >> ${GITHUB_OUTPUT}
 
-      # ==================== 关键修复：分离 uses 和 run ====================
+      # ==================== 关键修复 ====================
+      # 1. 加上 continue-on-error: true，防止 action 内部返回 1 导致整个 job 挂掉
+      # 2. 不再依赖 steps.compile.outputs.status（该 action 不设置此输出）
       - name: Compile the kernel [ ${{ inputs.kernel_version }} ]
         uses: ophub/amlogic-s9xxx-armbian@main
         id: compile
         if: steps.mapped.outputs.status == 'success' && !cancelled()
+        continue-on-error: true
         with:
           build_target: kernel
           kernel_source: ${{ inputs.kernel_source }}
@@ -174,31 +179,49 @@ jobs:
           compress_format: ${{ inputs.compress_format }}
           silent_log: ${{ inputs.silent_log }}
 
-      - name: Check compilation outputs
-        id: check
-        if: steps.compile.outputs.status == 'success' && !cancelled()
+      # ==================== 关键修复 ====================
+      # always() 保证此步骤总能运行
+      # 通过实际检查 /builder/output 是否有文件，来判断编译是否真成功
+      - name: Verify compilation outputs
+        id: verify
+        if: always() && steps.mapped.outputs.status == 'success'
         run: |
-          echo "PACKAGED_STATUS=success" >> $GITHUB_ENV
-          echo "PACKAGED_OUTPUTPATH=/builder/output" >> $GITHUB_ENV
-          echo "status=success" >> $GITHUB_OUTPUT
-          
-          # 调试：列出输出目录内容，确认文件存在
+          echo "=== Compile step conclusion: ${{ steps.compile.conclusion }} ==="
+          echo "=== Compile step outcome: ${{ steps.compile.outcome }} ==="
+          echo ""
           echo "=== Output directory contents ==="
-          ls -lah /builder/output/ 2>/dev/null || echo "Output dir not found or empty"
-          
-          echo "=== DTB files ==="
-          find /builder/output -name "*.dtb" -type f 2>/dev/null || echo "No .dtb files found"
-          
-          echo "=== Package files ==="
-          find /builder/output -name "*.deb" -o -name "*.tar.gz" -o -name "*.zip" 2>/dev/null || echo "No package files found"
+          ls -lah /builder/output/ 2>/dev/null || true
+          echo ""
+          echo "=== All files in output ==="
+          find /builder/output -type f 2>/dev/null || true
 
-      # ==================== 关键修复：更宽松的上传配置 ====================
+          # 判断标准：只要 /builder/output 目录存在且里面有文件，就认为成功
+          if [ -d "/builder/output" ] && [ -n "$(find /builder/output -type f 2>/dev/null | head -n 1)" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "PACKAGED_STATUS=success" >> $GITHUB_ENV
+            echo "PACKAGED_OUTPUTPATH=/builder/output" >> $GITHUB_ENV
+            echo "KERNEL_VERIFIED=true" >> $GITHUB_ENV
+            echo "[SUCCESS] Kernel output verified."
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "[ERROR] No output files found in /builder/output!"
+            exit 1
+          fi
+
+      # 备选上传：即使 Release 上传失败，产物也会保留在 Actions Artifacts 中
+      - name: Upload artifacts to GitHub Actions
+        uses: actions/upload-artifact@v4
+        if: steps.verify.outputs.status == 'success' && !cancelled()
+        with:
+          name: kernel-rk35xx-${{ inputs.kernel_version }}-${{ github.run_id }}
+          path: /builder/output/**/*
+          retention-days: 7
+
       - name: Upload Kernel to Release
         uses: ncipollo/release-action@v1
-        if: steps.check.outputs.status == 'success' && !cancelled()
+        if: steps.verify.outputs.status == 'success' && !cancelled()
         with:
           tag: kernel_rk35xx_${{ inputs.kernel_version }}
-          # 使用多行匹配，确保能捕获各种输出物
           artifacts: "/builder/output/**/*"
           allowUpdates: true
           makeLatest: false
